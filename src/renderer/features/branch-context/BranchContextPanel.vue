@@ -9,6 +9,7 @@ import MessageImages from "../../components/MessageImages.vue";
 import CopyButton from "../../components/CopyButton.vue";
 import GitBranchPicker from "../../components/GitBranchPicker.vue";
 import BranchHistory, { type HistoryTurn as Turn } from "./BranchHistory.vue";
+import CompactionHistory from "./CompactionHistory.vue";
 import PromptComposer from "../../components/PromptComposer.vue";
 import { useDraftSubmit } from "../../composables/useDraftSubmit";
 import { useLayoutStore } from "../../stores/layout";
@@ -22,6 +23,7 @@ const layout = useLayoutStore();
 const panelNodeId = computed(() => props.nodeId ?? session.focusedNode ?? session.current?.projection.activeNodeId ?? null);
 const panelNode = computed(() => session.nodeFor(panelNodeId.value));
 const selectedRun = computed(() => session.runFor(panelNodeId.value));
+const compaction = computed(() => session.compactionFor(panelNodeId.value));
 // Every branch's store updates immediately; only the visible view is frame-paced.
 const latestActivity = computed(() => layout.layout.collapsed.chat ? undefined : session.activityFor(panelNodeId.value));
 const activity = shallowRef<AgentActivity>();
@@ -74,7 +76,7 @@ const composerModel = ref<RuntimeModel | null>();
 const composerThinking = ref<string>();
 
 const composerRunnable = computed(() =>
-  Boolean(session.current?.runtime.available && (session.current.graph
+  Boolean(session.current?.runtime.available && compaction.value?.status !== "running" && (session.current.graph
     ? panelNode.value?.forkable !== false && !panelNodeId.value?.startsWith("pending:")
     : !session.current.runtime.isStreaming)));
 const composerModelValue = computed(() => {
@@ -88,7 +90,7 @@ const composerThinkingValue = computed(() =>
   ?? session.current?.runtime.thinkingLevel
   ?? "off");
 const composerPlaceholder = computed(() => !composerRunnable.value
-  ? t(session.current?.runtime.isStreaming ? "graph.blockedStreaming" : "graph.blockedReadonly")
+  ? t(compaction.value?.status === "running" ? "branch.compactionStatus.running" : session.current?.runtime.isStreaming ? "graph.blockedStreaming" : "graph.blockedReadonly")
   : t("draft.placeholder"));
 // The composer's send button doubles as the stop control while the branch it
 // targets is running: graph runs stop per-branch, plain sessions abort the stream.
@@ -168,7 +170,7 @@ const replacingHistory = computed(() => showingActivity.value && !activity.value
 
 const turns = computed(() => {
   const grouped: Array<{ id: string; user?: BranchMessage; body: BranchMessage[] }> = [];
-  for (const message of history.value.messages) {
+  for (const message of history.value.messages.filter(message => !message.compaction)) {
     if (message.role === "user") {
       grouped.push({ id: message.turnId, user: message, body: [] });
     } else {
@@ -380,6 +382,8 @@ onBeforeUnmount(() => {
 
     <div ref="scroll" class="branch-messages" @scroll="updateScrollFollow">
       <div ref="content" class="branch-messages-inner">
+      <CompactionHistory :records="history.compactions" :progress="compaction" :scope="historyKey"
+        :auto-enabled="selectedRun?.runtime?.autoCompactionEnabled ?? session.current?.runtime.autoCompactionEnabled" />
       <details v-if="session.current?.graph?.recoveredInputs?.length" class="graph-storage-state">
         <summary>{{ t('graph.recoveredInputs') }}</summary>
         <small>{{ t('graph.recoveredInputsHint') }}</small>

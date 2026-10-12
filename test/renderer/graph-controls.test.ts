@@ -44,9 +44,63 @@ function setup() {
 describe("graph viewport controls", () => {
   beforeEach(() => { vi.mocked(window.pix!.invoke).mockReset().mockResolvedValue({}); });
 
+  it("folds descendants, persists the fold, and reveals a searched or selected node", async () => {
+    const { wrapper, layout } = setup(); await flushPromises();
+    const session = useSessionStore();
+    const current = session.current!;
+    const entries = [...current.entries, { type: "message", id: "b", parentId: "a", timestamp: "2026-01-02", message: { role: "user", content: "B" } }];
+    session.applySnapshot({ ...current, entries, projection: projectSession(entries, "b") });
+    await flushPromises();
+    const graph = (wrapper.vm as any).$.setupState;
+    graph.toggleBranch("turn:a");
+    expect(graph.nodes.find((node: any) => node.id === "turn:b").hidden).toBe(true);
+    expect(graph.edges[0].hidden).toBe(true);
+    expect(Object.values(layout.layout.graphVisibility!)[0].collapsed).toEqual(["turn:a"]);
+    await graph.select("turn:b"); await flushPromises();
+    expect(graph.nodes.find((node: any) => node.id === "turn:b").hidden).toBe(false);
+    expect(graph.edges[0].hidden).toBe(false);
+  });
+
+  it("enables box selection and retains every selected card's dropped position", async () => {
+    const { wrapper } = setup(); await flushPromises();
+    await wrapper.find('[data-action="graph-selection"]').trigger("click");
+    const graph = (wrapper.vm as any).$.setupState;
+    expect(graph.selectionMode).toBe(true);
+    const session = useSessionStore();
+    const current = session.current!;
+    const entries = [...current.entries, { type: "message", id: "b", parentId: "a", timestamp: "2026-01-02", message: { role: "user", content: "B" } }];
+    session.applySnapshot({ ...current, entries, projection: projectSession(entries, "b") });
+    await flushPromises();
+    const moved = graph.nodes.map((node: any, i: number) => ({ ...node, position: { x: 1000 + i * 500, y: 700 } }));
+    graph.rememberDrag({ node: moved[0], nodes: moved, event: new MouseEvent("mouseup") });
+    graph.rebuild();
+    expect(graph.nodes.map((node: any) => node.position)).toEqual(moved.map((node: any) => node.position));
+  });
+
+  it("keeps running paths visible while hiding inactive branches and restores all branches", async () => {
+    const { wrapper } = setup(); await flushPromises();
+    const session = useSessionStore();
+    const current = session.current!;
+    const entries = [...current.entries,
+      { type: "message", id: "b", parentId: "a", timestamp: "2026-01-02", message: { role: "user", content: "B" } },
+      { type: "message", id: "c", parentId: "a", timestamp: "2026-01-03", message: { role: "user", content: "C" } },
+      { type: "message", id: "d", parentId: "a", timestamp: "2026-01-04", message: { role: "user", content: "D" } },
+    ];
+    const projection = projectSession(entries, "b");
+    projection.nodes = projection.nodes.map(node => node.id === "turn:c" ? { ...node, running: true } : node);
+    session.applySnapshot({ ...current, entries, projection }); await flushPromises();
+    await wrapper.find('[data-action="graph-hide-inactive"]').trigger("click");
+    const graph = (wrapper.vm as any).$.setupState;
+    expect(graph.nodes.filter((node: any) => !node.hidden).map((node: any) => node.id)).toEqual(["turn:a", "turn:b", "turn:c"]);
+    graph.toggleBranch("turn:a");
+    expect(graph.nodes.find((node: any) => node.id === "turn:c").hidden).toBe(false);
+    await wrapper.find('[data-action="graph-show-all"]').trigger("click");
+    expect(graph.nodes.every((node: any) => !node.hidden)).toBe(true);
+  });
+
   it("toggles and persists the minimap through the actual toolbar button", async () => {
     const { wrapper, layout } = setup(); await flushPromises();
-    const button = wrapper.find('.graph-controls button[aria-pressed]');
+    const button = wrapper.find('[data-action="graph-minimap"]');
     expect(wrapper.find('.test-minimap').exists()).toBe(false);
     await button.trigger("click"); await flushPromises();
     expect(button.attributes("aria-pressed")).toBe("true");
@@ -59,7 +113,7 @@ describe("graph viewport controls", () => {
 
   it("colors running minimap nodes with the standalone running token, not an accent shade", async () => {
     const { wrapper, MiniMap } = setup(); await flushPromises();
-    await wrapper.find('.graph-controls button[aria-pressed]').trigger("click");
+    await wrapper.find('[data-action="graph-minimap"]').trigger("click");
     await flushPromises();
     const nodeColor = wrapper.findComponent(MiniMap).props("nodeColor") as (node: { type?: string; data?: unknown }) => string;
     expect(nodeColor).toBeTypeOf("function");
@@ -71,7 +125,7 @@ describe("graph viewport controls", () => {
 
   it("navigates to the minimap's graph coordinates without changing zoom or selection", async () => {
     const { wrapper, setCenter, MiniMap } = setup(); await flushPromises();
-    await wrapper.find('.graph-controls button[aria-pressed]').trigger("click");
+    await wrapper.find('[data-action="graph-minimap"]').trigger("click");
     await flushPromises(); setCenter.mockClear();
     wrapper.findComponent(MiniMap).vm.$emit("click", { position: { x: 1024, y: -800 }, event: new MouseEvent("click") });
     expect(setCenter).toHaveBeenCalledExactlyOnceWith(1024, -800, { zoom: 0.4 });

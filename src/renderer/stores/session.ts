@@ -14,6 +14,7 @@ import type {
 } from "../../shared/types";
 import { projectId } from "../../shared/types";
 import { reduceAgentActivity } from "../../shared/agent-stream";
+import { compactionProgress, type CompactionProgress, type CompactionRecord } from "../../shared/compaction";
 import { entryAnchorForNode, isSessionRunning } from "../../shared/session";
 import { desktop } from "../api";
 import { i18n } from "../i18n";
@@ -92,6 +93,7 @@ export const useSessionStore = defineStore("session", {
     models: [] as RuntimeModel[],
     activity: undefined as AgentActivity | undefined,
     branchActivities: {} as Record<string, { runId: string; activity?: AgentActivity }>,
+    compactions: {} as Record<string, { runId?: string; progress: CompactionProgress }>,
     pendingPrompt: undefined as PendingPrompt | undefined,
     deletingNode: false,
   }),
@@ -162,6 +164,17 @@ export const useSessionStore = defineStore("session", {
     activityFor(id: string | null): AgentActivity | undefined {
       return activityForId(this, id);
     },
+    compactionFor(id: string | null): CompactionProgress | undefined {
+      const run = runForId(this.current, id);
+      if (!run && id !== this.current?.projection.activeNodeId) return undefined;
+      const branchId = run?.branchId ?? this.nodeFor(id)?.branchId ?? "main";
+      if (run?.runtime?.isCompacting) return this.compactions[branchId]?.progress.status === "running"
+        ? this.compactions[branchId]!.progress : { status: "running" };
+      const state = this.compactions[branchId];
+      if (state && (!run || !state.runId || state.runId === run.runId)) return state.progress;
+      if (branchId === "main" && this.current?.runtime.isCompacting) return { status: "running" };
+      return undefined;
+    },
     nodeFor(id: string | null) {
       return nodeForId(this.current, id);
     },
@@ -191,6 +204,7 @@ export const useSessionStore = defineStore("session", {
       this.highlightedNode = null;
       this.activity = undefined;
       this.branchActivities = {};
+      this.compactions = {};
       this.pendingPrompt = undefined;
       this.current = undefined;
       this.commands = [];
@@ -215,6 +229,7 @@ export const useSessionStore = defineStore("session", {
       if (record) this.sessions = record.sessions;
       this.activity = undefined;
       this.branchActivities = {};
+      this.compactions = {};
       if (this.current) this.current.runtime = {
         ...this.current.runtime, available: false, isStreaming: false,
         isCompacting: false, isRetrying: false,
@@ -235,6 +250,7 @@ export const useSessionStore = defineStore("session", {
       }
       if (graphChanged || previousGraph?.epoch !== snapshot.graph?.epoch) {
         this.branchActivities = {};
+        this.compactions = {};
         messageCaches.delete(this);
       } else if (previousProjection) reuseGraphProjection(previousProjection, snapshot.projection);
       const pending = this.pendingPrompt;
@@ -267,15 +283,21 @@ export const useSessionStore = defineStore("session", {
     },
     onAgentEvent(event: unknown) {
       const scoped = event as { graphId?: string; branchId?: string; runId?: string };
+      if (scoped.graphId && scoped.graphId !== (this.current?.graph?.id ?? this.current?.session.path)) return;
+      const progress = compactionProgress(event);
       if (scoped.graphId && scoped.branchId && scoped.runId) {
         if (scoped.graphId !== this.current?.graph?.id) return;
         const known = this.current.graph.runs.find(r => r.branchId === scoped.branchId);
         if (known && known.runId !== scoped.runId) return;
+        if ((event as { type?: string }).type === "agent_start") delete this.compactions[scoped.branchId];
+        if (progress) this.compactions[scoped.branchId] = { runId: scoped.runId, progress };
         const old = this.branchActivities[scoped.branchId];
         this.branchActivities[scoped.branchId] = { runId: scoped.runId,
           activity: reduceAgentActivity(old?.runId === scoped.runId ? old.activity : undefined, event) };
         return;
       }
+      if ((event as { type?: string }).type === "agent_start") delete this.compactions[scoped.branchId ?? "main"];
+      if (progress) this.compactions[scoped.branchId ?? "main"] = { progress };
       this.activity = reduceAgentActivity(this.activity, event);
       if ((event as { type?: unknown } | null)?.type === "agent_start")
         this.focusedNode = null;
@@ -426,7 +448,7 @@ export const useSessionStore = defineStore("session", {
     },
     messageWindowFor(id: string | null, limit: number) {
       const current = this.current;
-      if (!current) return { messages: [] as BranchMessage[], hasEarlier: false };
+      if (!current) return { messages: [] as BranchMessage[], hasEarlier: false, compactions: [] as CompactionRecord[] };
       let cached = messageCaches.get(this);
       if (!cached) { cached = createBranchMessageCache(); messageCaches.set(this, cached); }
       const node = current.projection.nodes.find(item => item.id === id);

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   DialogContent,
+  DialogDescription,
   DialogOverlay,
   DialogPortal,
   DialogRoot,
@@ -659,6 +660,7 @@ onBeforeUnmount(() => {
       <DialogOverlay class="dialog-overlay" />
       <DialogContent class="rename-dialog" data-compact-dialog>
         <DialogTitle>{{ t("command.compact") }}</DialogTitle>
+        <DialogDescription>{{ t('compactDescription') }}</DialogDescription>
         <form @submit.prevent="submitCompact">
           <input v-model="compactInstructions" :placeholder="t('compactPrompt')" :aria-label="t('compactPrompt')" :disabled="compactBusy" />
           <footer>

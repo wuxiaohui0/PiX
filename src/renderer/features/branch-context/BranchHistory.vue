@@ -40,7 +40,7 @@ const { t } = useI18n();
           <p v-if="turn.user.text || !turn.user.images?.length">{{ turn.user.text || t("common.empty") }}</p>
           <MessageImages :images="turn.user.images" />
           <div class="message-actions">
-            <ContextStatus :status="turn.user.contextStatus" />
+            <ContextStatus :status="turn.user.contextStatus" :reason="turn.user.contextReason" />
             <CopyButton :text="turn.user.text" />
           </div>
         </article>
@@ -61,7 +61,7 @@ const { t } = useI18n();
           <div v-if="expandedProcesses.has(turn.id)" class="process-items">
             <template v-for="message in processMessages.get(turn.id)" :key="message.entryId">
               <details v-if="message.thinking" class="process-item process-thinking">
-                <summary><Brain :size="13" /><strong>{{ t("branch.thinking") }}<ContextStatus :status="message.contextStatus" /></strong></summary>
+                <summary><Brain :size="13" /><strong>{{ t("branch.thinking") }}<ContextStatus :status="message.contextStatus" :reason="message.contextReason" /></strong></summary>
                 <p>{{ message.thinking }}</p>
               </details>
               <details
@@ -71,7 +71,7 @@ const { t } = useI18n();
               >
                 <summary>
                   <Terminal :size="13" />
-                  <strong>{{ message.toolName || t("branch.tool") }}<ContextStatus :status="message.contextStatus" /></strong>
+                  <strong>{{ message.toolName || t("branch.tool") }}<ContextStatus :status="message.contextStatus" :reason="message.contextReason" /></strong>
                   <code v-if="message.toolInput" :title="message.toolInput">{{ message.toolInput }}</code>
                 </summary>
                 <pre>{{ message.text || t("common.noOutput") }}</pre>
@@ -90,13 +90,13 @@ const { t } = useI18n();
                 <MarkdownRenderer :content="message.text" :custom-id="message.entryId" />
                 <MessageImages :images="message.images" />
                 <div class="message-actions">
-                  <ContextStatus :status="message.contextStatus" />
+                  <ContextStatus :status="message.contextStatus" :reason="message.contextReason" />
                   <CopyButton :text="message.text" />
                 </div>
               </div>
             </template>
             <details v-if="turn.terminal?.thinking" class="process-item process-thinking">
-              <summary><Brain :size="13" /><strong>{{ t("branch.thinking") }}<ContextStatus :status="turn.terminal.contextStatus" /></strong></summary>
+              <summary><Brain :size="13" /><strong>{{ t("branch.thinking") }}<ContextStatus :status="turn.terminal.contextStatus" :reason="turn.terminal.contextReason" /></strong></summary>
               <p>{{ turn.terminal.thinking }}</p>
             </details>
           </div>
@@ -105,7 +105,7 @@ const { t } = useI18n();
         <article v-if="turn.terminal?.isError" class="branch-message assistant error-response">
           <p class="error-message">{{ errorText(turn.terminal) }}</p>
           <div class="message-actions">
-            <ContextStatus :status="turn.terminal.contextStatus" />
+            <ContextStatus :status="turn.terminal.contextStatus" :reason="turn.terminal.contextReason" />
             <CopyButton :text="errorText(turn.terminal)" />
           </div>
         </article>
@@ -115,7 +115,7 @@ const { t } = useI18n();
           <MarkdownRenderer :content="turn.terminal.text" :custom-id="turn.terminal.entryId" />
           <MessageImages :images="turn.terminal.images" />
           <div class="message-actions">
-            <ContextStatus :status="turn.terminal.contextStatus" />
+            <ContextStatus :status="turn.terminal.contextStatus" :reason="turn.terminal.contextReason" />
             <CopyButton :text="turn.terminal.text" />
           </div>
         </article>

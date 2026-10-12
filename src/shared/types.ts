@@ -95,6 +95,7 @@ export interface NodeFooterState {
   thinkingLevel: string;
 }
 export interface GraphNode {
+  compactionCount?: number;
   /** Git branch at turn start, recorded as the pix.git-branch entry the user message hangs off. */
   gitBranch?: string;
   fileChanges?: FileChange[];
@@ -135,6 +136,8 @@ export interface BranchMessage {
   isError?: boolean;
   errorMessage?: string;
   contextStatus?: "excluded" | "modified";
+  contextReason?: "compaction" | "edit";
+  compaction?: boolean;
 }
 export interface AgentActivityItem {
   id: string;
@@ -388,6 +391,7 @@ export interface SettingsBundle {
   paths: { app: string; global: string; project: string | null };
 }
 export interface LayoutState {
+  graphVisibility?: Record<string, { collapsed: string[]; hideInactive: boolean }>;
   version?: number;
   branchOrders?: Record<string, Array<[string, number]>>;
   /** Keep the projects and sessions navigator open instead of auto-hiding it. */

@@ -1,5 +1,6 @@
 import type { RawSessionEntry, SessionProjection } from "../../shared/types.js";
 import { projectSession, sessionEntryIndex } from "../../shared/session.js";
+import { branchContext, type CompactionRecord } from "../../shared/compaction.js";
 
 // Snapshots cross IPC as JSON-shaped data. Compare without serializing large
 // tool results; retaining equal objects keeps background runs out of view work.
@@ -25,7 +26,7 @@ export function reuseGraphProjection(previous: SessionProjection, next: SessionP
 }
 
 export function createBranchMessageCache() {
-  const cache = new Map<string, { entries: RawSessionEntry[]; result: { messages: SessionProjection["messages"]; hasEarlier: boolean } }>();
+  const cache = new Map<string, { path: RawSessionEntry[]; window: RawSessionEntry[]; result: { messages: SessionProjection["messages"]; hasEarlier: boolean; compactions: CompactionRecord[] } }>();
   return (entries: RawSessionEntry[], leaf: string | null, limit: number) => {
     const index = sessionEntryIndex(entries);
     const path: RawSessionEntry[] = [];
@@ -36,23 +37,37 @@ export function createBranchMessageCache() {
       seen.add(entry.id);
       path.push(entry);
       if (entry.type === "message" && (entry.message as { role?: string })?.role === "user") {
-        if (++turns > limit) { hasEarlier = true; break; }
-        cut = path.length;
+        if (++turns > limit) hasEarlier = true;
+        else cut = path.length;
       }
       entry = entry.parentId ? index.get(entry.parentId) : undefined;
     }
     // Keep complete turns. In particular, never parse text in the older prefix
     // merely to decide whether the "load earlier" button should be visible.
-    const window = (hasEarlier ? path.slice(0, cut) : path).reverse();
+    const window = path.slice(0, hasEarlier ? cut : path.length).reverse();
     const key = `${leaf}:${limit}`;
     const old = cache.get(key);
-    const result = old && old.result.hasEarlier === hasEarlier && sameData(old.entries, window)
-      ? old.result : { messages: projectSession(window, leaf).messages, hasEarlier };
+    let result = old?.result;
+    if (!old || old.path.length !== path.length || old.path.some((entry, i) => entry !== path[i])) {
+      const context = branchContext([...path].reverse());
+      if (old && old.result.hasEarlier === hasEarlier && sameData(old.window, window)
+        && sameData(old.result.compactions, context.compactions)
+        && old.result.messages.every(message => message.contextStatus === context.statuses.get(message.entryId)
+          && message.contextReason === context.reasons.get(message.entryId))) result = old.result;
+      else {
+        const messages = projectSession(window, leaf).messages.map(message => {
+          const { contextStatus: _status, contextReason: _reason, ...original } = message;
+          const status = context.statuses.get(message.entryId);
+          return status ? { ...original, contextStatus: status, contextReason: context.reasons.get(message.entryId) } : original;
+        });
+        result = { messages, hasEarlier, compactions: context.compactions };
+      }
+    }
     cache.delete(key);
-    cache.set(key, { entries: window, result });
+    cache.set(key, { path, window, result: result! });
     // Bound view caching independently of the number of historical graph nodes;
     // up to three chat panels page through history at the same time.
     if (cache.size > 32) cache.delete(cache.keys().next().value!);
-    return result;
+    return result!;
   };
 }

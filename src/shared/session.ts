@@ -11,6 +11,7 @@ import type {
 import { GIT_BRANCH_CUSTOM_TYPE, NODE_FOOTER_CUSTOM_TYPE } from "./types.js";
 import { turnFileChanges } from "./file-changes.js";
 import { isPromptImage } from "./images.js";
+import { branchContext } from "./compaction.js";
 
 export function isSessionRunning(snapshot: SessionSnapshot): boolean {
   const runtime = snapshot.runtime;
@@ -264,8 +265,10 @@ export function projectSession(
       .filter((x) => x.type === "message" && role(x) === "assistant")
       .at(-1);
     const gitBranch = gitBranches.get(e.parentId ?? "");
+    const compactionCount = owned.filter(entry => entry.type === "compaction").length;
     return {
       id: `turn:${e.id}`,
+      ...(compactionCount ? { compactionCount } : {}),
       userEntryId: e.id,
       ...(gitBranch ? { gitBranch } : {}),
       parentId: ((p) => (p ? `turn:${p}` : null))(context(e.parentId).owner),
@@ -348,29 +351,19 @@ export function projectSession(
         entryId: id,
         turnId,
         role: "system",
+        ...(e.type === "compaction" ? { compaction: true } : {}),
         text: text(e),
         timestamp: e.timestamp,
       });
   }
-  // Context edits are branch-local and last-write-wins. Compaction drops the
-  // older prefix (including its edits); paged history may start after that boundary.
-  // Badge-only divergences from the SDK projection, tracked in #22: an off-branch
-  // firstKeptEntryId (hand-edited files only — the SDK always picks it from the
-  // current path) clamps keptFrom to 0 instead of the SDK's summary-only reading,
-  // and an older compaction inside the newest retained range stays unbadged even
-  // though the SDK projects older compactions to no model messages.
   const path = activeBranchEntryIds.map(id => byId.get(id)!);
-  const compaction = [...path].reverse().find(entry => entry.type === "compaction");
-  const keptFrom = compaction ? Math.max(0, activeBranchEntryIds.indexOf(String(compaction.firstKeptEntryId))) : 0;
-  const kept = new Set(activeBranchEntryIds.slice(keptFrom));
-  const edits = new Map<string, NonNullable<BranchMessage["contextStatus"]>>();
-  for (const entry of path.slice(keptFrom)) {
-    if (entry.type === "context_edit" && typeof entry.targetId === "string" && kept.has(entry.targetId))
-      edits.set(entry.targetId, entry.replacement === null ? "excluded" : "modified");
-  }
+  const contextState = branchContext(path);
   for (const message of messages) {
-    const status = kept.has(message.entryId) ? edits.get(message.entryId) : "excluded";
-    if (status) message.contextStatus = status;
+    const status = contextState.statuses.get(message.entryId);
+    if (status) {
+      message.contextStatus = status;
+      message.contextReason = contextState.reasons.get(message.entryId);
+    }
   }
   return {
     nodes,

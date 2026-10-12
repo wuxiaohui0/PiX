@@ -37,6 +37,10 @@ Branching is an everyday action in PiX, not something you have to plan ahead:
 
 ## Context follows the branch
 
+The graph is an infinite canvas: scroll to zoom (5–300%), drag the background or hold Space to pan, and use the toolbar to fit the visible graph. Shift+drag or the selection tool selects several cards for moving together. Ctrl/Cmd+click adds cards to the selection. Each parent card can collapse its descendants and shows the hidden count; the toolbar can hide inactive branches or restore every branch. Fold settings are remembered per session. Running paths stay visible, and navigating to a search result reveals its branch.
+
+Long conversations show context compaction records in the branch chat, including saved summaries, retained history boundaries, message counts and available token usage. Live status explains manual, threshold and overflow compaction, including cancellation and failures. After-compaction tokens are explicitly labelled as estimates when provided by the runtime. Graph cards mark turns with compaction; historical messages identify when their model context was replaced by a summary. Compaction keeps the original history, and `/compact` accepts a focus to help preserve important details.
+
 Switching branches never means re-setting up context — context is part of the branch:
 
 - The **branch chat panel** shows only the messages of the active branch. Switch to another branch and the chat switches with it.

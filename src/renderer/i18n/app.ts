@@ -139,6 +139,7 @@ export const en = {
     descriptions: { commands: "Find and run a PiX command", terminal: "Open the terminal in the tools panel", navigator: "Show or hide projects and sessions", tools: "Show or hide the tools panel", settings: "Open PiX preferences", history: "Open the operation history panel" },
   },
   compactPrompt: "Optional focus",
+  compactDescription: "Replace earlier model context with a summary and keep recent messages. Original history stays saved. Summaries may omit details; use the focus field to name information that must be preserved.",
   update: {
     available: "PiX {version} is available",
     viewRelease: "View release",
@@ -284,6 +285,7 @@ export const zhCN: typeof en = {
     descriptions: { commands: "查找并运行 PiX 命令", terminal: "在工具面板中打开终端", navigator: "显示或隐藏项目与会话列表", tools: "显示或隐藏工具面板", settings: "打开 PiX 偏好设置", history: "打开操作历史面板" },
   },
   compactPrompt: "可选的关注重点",
+  compactDescription: "将较早的模型上下文替换为摘要并保留近期消息，原始历史仍会保存。摘要可能遗漏细节；请在关注重点中注明需要保留的信息。",
   update: {
     available: "PiX {version} 可用",
     viewRelease: "查看发布页",

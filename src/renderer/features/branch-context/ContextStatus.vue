@@ -4,9 +4,9 @@ import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import type { BranchMessage } from "../../../shared/types";
 
-const props = defineProps<{ status?: BranchMessage["contextStatus"] }>();
+const props = defineProps<{ status?: BranchMessage["contextStatus"]; reason?: BranchMessage["contextReason"] }>();
 const { t } = useI18n();
-const label = computed(() => t(props.status === "excluded" ? "branch.contextExcluded" : "branch.contextModified"));
+const label = computed(() => t(props.reason === "compaction" ? "branch.contextSummarized" : props.status === "excluded" ? "branch.contextExcluded" : "branch.contextModified"));
 </script>
 
 <template>

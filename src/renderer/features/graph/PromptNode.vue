@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { AlertCircle, ArrowDown, ArrowUp, Brain, Check, FolderOutput, GitBranch, Image, LoaderCircle, MessageSquare, Plus, RotateCcw, Sparkles, Trash2, UserRound, Wrench } from "@lucide/vue";
+import { AlertCircle, Archive, ArrowDown, ArrowUp, Brain, Check, FolderOutput, GitBranch, Image, LoaderCircle, MessageSquare, Plus, RotateCcw, Sparkles, Trash2, UserRound, Wrench } from "@lucide/vue";
 import { ContextMenuRoot, ContextMenuTrigger, ContextMenuPortal, ContextMenuContent, ContextMenuItem } from "reka-ui";
 import { Handle, Position } from "@vue-flow/core";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
@@ -27,6 +27,9 @@ export interface PromptNodeData {
   running?: boolean;
   /** True while the node matches the active graph search query. */
   searchHit?: boolean;
+  hiddenCount?: number;
+  collapsed?: boolean;
+  onToggleBranch?: () => void;
   content: () => NodeContent;
   onCompose: (direction?: BranchDirection) => void;
   /** Opens this node in a pinned chat column; graph sessions only. */
@@ -198,6 +201,7 @@ function relative(value: string) {
       <span class="turn-role" :title="t('graph.you')" :aria-label="t('graph.you')"><UserRound :size="13" /></span>
       <strong>{{ data.node.title }}</strong>
       <aside class="node-meta">
+        <span v-if="data.node.compactionCount" :title="t('graph.compactionCount', { n: data.node.compactionCount })" :aria-label="t('graph.compactionCount', { n: data.node.compactionCount })"><Archive :size="12" />{{ data.node.compactionCount }}</span>
         <span v-if="data.running" class="node-run-state" role="status" :title="t('graph.agentRunning')" :aria-label="t('graph.agentRunning')"><LoaderCircle :size="12" class="spin" /></span>
         <span v-if="data.node.imageCount" :title="t('draft.attachedImages', { n: data.node.imageCount })"><Image :size="11" />{{ data.node.imageCount }}</span>
         <span v-if="data.current" :title="t('graph.currentTurn')" :aria-label="t('graph.currentTurn')"><Check :size="11" /></span>
@@ -220,6 +224,13 @@ function relative(value: string) {
       class="node-footer nodrag nowheel"
       @click.stop
     >
+      <button v-if="data.onToggleBranch" type="button" class="node-fold nodrag nopan nowheel"
+        :aria-expanded="!data.collapsed && !data.hiddenCount"
+        :aria-label="t(data.collapsed || data.hiddenCount ? 'graph.expandBranch' : 'graph.collapseBranch')"
+        :title="t(data.collapsed || data.hiddenCount ? 'graph.expandBranch' : 'graph.collapseBranch')"
+        @pointerdown.stop @dblclick.stop @click.stop="suppressPreview(); data.onToggleBranch()">
+        {{ data.hiddenCount ? `+${data.hiddenCount}` : '−' }}
+      </button>
       <span v-if="data.node.gitBranch" class="node-footer-value node-git-branch"
         :title="t('graph.gitBranchAtStart', { branch: data.node.gitBranch })"
         :aria-label="t('graph.gitBranchAtStart', { branch: data.node.gitBranch })">

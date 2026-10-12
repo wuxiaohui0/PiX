@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Focus, Map as MapIcon, Network, Search } from "@lucide/vue";
+import { Focus, Map as MapIcon, Network, Search, Scan, MousePointer2, Hand, EyeOff, RotateCcw, Plus, Minus } from "@lucide/vue";
 import {
   VueFlow,
   type Edge,
@@ -22,6 +22,7 @@ import { layoutGraph, reserveManualPositions, type BranchDirection, type ManualP
 import { useDraftSubmit } from "../../composables/useDraftSubmit";
 import { nextFrame, whenTransitionsSettle, whenVisible } from "../../lib/frame";
 import { searchGraphNodeIds } from "../../lib/graph-search";
+import { graphVisibility } from "../../lib/graph-visibility";
 import { useLayoutStore } from "../../stores/layout";
 import { useSessionStore } from "../../stores/session";
 import type { GraphNode, PromptImage, RuntimeModel } from "../../../shared/types";
@@ -33,7 +34,7 @@ const layout = useLayoutStore();
 const session = useSessionStore();
 const { t } = useI18n();
 const { submitDraft: runDraftSubmit, acceptSubmittedNode: acceptSubmittedDraft, clearSubmittedDraft, submittedNodeId } = useDraftSubmit();
-type RenderNode = Node & { dimensions?: Dimensions; handleBounds?: FlowNode["handleBounds"] };
+type RenderNode = Node & { selected?: boolean; dimensions?: Dimensions; handleBounds?: FlowNode["handleBounds"] };
 const nodes = shallowRef<RenderNode[]>([]);
 const edges = shallowRef<Edge[]>([]);
 const flow = shallowRef<VueFlowStore>();
@@ -79,6 +80,63 @@ const DRAFT_SIZE = { width: 440, height: 320 };
 const booted = ref(false);
 const deleteError = ref("");
 const searchOpen = ref(false);
+const selectionMode = ref(false);
+const selectedIds = ref(new Set<string>());
+const collapsedBranches = ref(new Set<string>());
+const hideInactive = ref(false);
+const viewportZoom = ref(1);
+const visibility = computed(() => {
+  const items = projection.value?.nodes ?? [];
+  const parents = new Map(items.map(node => [node.id, node.parentId]));
+  const runningPath = new Set<string>();
+  const retainPath = (id: string | null | undefined, target: Set<string>) => {
+    while (id && !target.has(id)) { target.add(id); id = parents.get(id); }
+  };
+  for (const node of items) if (node.running) retainPath(node.id, runningPath);
+  for (const run of session.current?.graph?.runs ?? [])
+    if (run.status === "running") retainPath(run.pending?.parentNodeId, runningPath);
+  retainPath(session.pendingPrompt?.targetNodeId, runningPath);
+  retainPath(draftParent.value, runningPath);
+  const retained = new Set([...projection.value?.activeBranchNodeIds ?? [], ...runningPath]);
+  retainPath(session.focusedNode, retained);
+  const collapsed = new Set([...collapsedBranches.value].filter(id => !runningPath.has(id)));
+  return graphVisibility(items, collapsed, hideInactive.value ? retained : undefined);
+});
+function saveVisibility() {
+  (layout.layout.graphVisibility ??= {})[sessionKey.value] = {
+    collapsed: [...collapsedBranches.value], hideInactive: hideInactive.value,
+  };
+  void layout.save().catch(error => layout.showNotice(String(error), "error"));
+}
+function toggleBranch(id: string) {
+  const next = new Set(collapsedBranches.value);
+  if (next.has(id) || visibility.value.hiddenCounts.has(id)) {
+    next.delete(id);
+    hideInactive.value = false;
+  } else next.add(id);
+  collapsedBranches.value = next;
+  saveVisibility();
+  rebuild();
+}
+function revealNode(id: string) {
+  if (!visibility.value.hidden.has(id)) return;
+  const parents = new Map(projection.value?.nodes.map(node => [node.id, node.parentId]));
+  const next = new Set(collapsedBranches.value);
+  for (let parent = parents.get(id); parent; parent = parents.get(parent)) next.delete(parent);
+  collapsedBranches.value = next;
+  hideInactive.value = false;
+  saveVisibility();
+  rebuild();
+}
+function showAllBranches() {
+  collapsedBranches.value = new Set(); hideInactive.value = false;
+  saveVisibility(); rebuild();
+}
+async function fitCanvas() {
+  if (!flow.value) return;
+  centerRequest++;
+  await flow.value.fitView({ nodes: nodes.value.filter(node => !node.hidden).map(node => node.id), padding: 0.15, duration: 0 });
+}
 const searchQuery = ref("");
 // A plain click highlights a card without rebinding the chat panel — only a
 // double-click, a Ctrl gesture, or a submission moves panel content. The card
@@ -123,15 +181,16 @@ function rememberBranchOrder(id: string, order: number, pendingId?: string) {
   void layout.save().catch(error => layout.showNotice(String(error), "error"));
 }
 const renderGraph = computed(() => {
-  if (nodes.value.length < 500) return { nodes: nodes.value, edges: edges.value };
+  if (nodes.value.length < 500 || selectionMode.value) return { nodes: nodes.value, edges: edges.value };
   if (!flow.value) return { nodes: nodes.value.filter(node => node.id === defaultFocusId()), edges: [] };
   const viewport = flow.value.getViewport();
   const size = flow.value.dimensions.value;
   const targets = new Set(nodes.value.filter(node => {
+    if (node.hidden) return false;
     const x = node.position.x * viewport.zoom + viewport.x;
     const y = node.position.y * viewport.zoom + viewport.y;
-    return x < size.width + 100 && x + 360 * viewport.zoom > -100
-      && y < size.height + 100 && y + 280 * viewport.zoom > -100;
+    return x < size.width + 100 && x + (node.dimensions?.width ?? 320) * viewport.zoom > -100
+      && y < size.height + 100 && y + (node.dimensions?.height ?? 146) * viewport.zoom > -100;
   }).map(node => node.id));
   // A wide fork can have thousands of curves starting at one visible parent.
   // Keep incoming connections to visible cards; the overview shows the full tree.
@@ -178,6 +237,10 @@ function rebuild() {
   let restoredSizes: Map<string, Dimensions> | undefined;
   if (activeSession !== sessionKey.value) {
     dragged.clear();
+    selectedIds.value = new Set();
+    const savedVisibility = layout.layout.graphVisibility?.[sessionKey.value];
+    collapsedBranches.value = new Set(savedVisibility?.collapsed ?? []);
+    hideInactive.value = savedVisibility?.hideInactive ?? false;
     restoredLayout = rememberedLayouts.get(sessionKey.value);
     restoredSizes = rememberedDimensions.get(sessionKey.value);
     branchOrder.clear();
@@ -244,14 +307,22 @@ function rebuild() {
   // While a submitted prompt is being processed the runtime is busy even though
   // the streaming flag only lands with the next snapshot, so both gate composing.
   const busy = !session.current?.graph && Boolean(session.current?.runtime.isStreaming || session.pendingPrompt);
+  const selectableIds = new Set(value.nodes.filter(node => !visibility.value.hidden.has(node.id)).map(node => node.id));
+  if ([...selectedIds.value].some(id => !selectableIds.has(id)))
+    selectedIds.value = new Set([...selectedIds.value].filter(id => selectableIds.has(id)));
   const turns: Node<PromptNodeData>[] = placed.nodes.map((node, index) => ({
     id: node.id,
     type: "prompt",
+    hidden: visibility.value.hidden.has(node.id),
+    selected: selectedIds.value.has(node.id),
     position: { x: node.x, y: node.y },
     data: stablePrompt({
       node: value.nodes[index]!,
       active: active.has(node.id),
       current: value.activeNodeId === node.id,
+      hiddenCount: visibility.value.hiddenCounts.get(node.id) ?? 0,
+      collapsed: collapsedBranches.value.has(node.id),
+      onToggleBranch: visibility.value.parentsWithChildren.has(node.id) ? () => toggleBranch(node.id) : undefined,
       runnable: Boolean(session.current?.runtime.available && !busy && node.forkable !== false),
       running: node.running,
       blockedReason: busy
@@ -364,6 +435,7 @@ function rebuild() {
   const nextNodes: RenderNode[] = [...turns, ...(pendingTurn ? [pendingTurn] : []), ...(draft ? [draft] : [])];
   const nextEdges: Edge[] = value.edges.map((edge) => ({
     ...edge,
+    hidden: visibility.value.hidden.has(edge.source) || visibility.value.hidden.has(edge.target),
     class: "",
   }));
   if (pending && pendingParent)
@@ -420,13 +492,13 @@ function rebuild() {
   layoutBranches(nextNodes);
   const stableNodes = nextNodes.map(node => {
     const previous = previousNodes.get(node.id);
-    return previous && previous.type === node.type && previous.data === node.data
+    return previous && previous.type === node.type && previous.data === node.data && previous.hidden === node.hidden && previous.selected === node.selected
       && previous.position.x === node.position.x && previous.position.y === node.position.y ? previous : node;
   });
   if (stableNodes.length !== nodes.value.length || stableNodes.some((node, i) => node !== nodes.value[i])) nodes.value = stableNodes;
   if (nextEdges.length !== edges.value.length || nextEdges.some((edge, i) => {
     const old = edges.value[i];
-    return !old || edge.id !== old.id || edge.source !== old.source || edge.target !== old.target || edge.class !== old.class || edge.animated !== old.animated;
+    return !old || edge.id !== old.id || edge.source !== old.source || edge.target !== old.target || edge.class !== old.class || edge.animated !== old.animated || edge.hidden !== old.hidden;
   })) edges.value = nextEdges;
   const ids = new Set(nodes.value.map(node => node.id));
   for (const id of promptCache.keys()) if (!ids.has(id)) promptCache.delete(id);
@@ -436,7 +508,7 @@ function layoutBranches(items: RenderNode[]) {
   // Runs on every rebuild and resize so settled lanes follow measured card
   // heights; transients reserve vertical space but never widen columns, and a
   // draft's reservation is capped at its opening slot so growth only overlays.
-  const visible = items.filter(node => !(node.type === "draft" && session.pendingPrompt));
+  const visible = items.filter(node => !node.hidden && !(node.type === "draft" && session.pendingPrompt));
   const depths = new Map(projection.value?.nodes.map(node => [node.id, node.depth]));
   const tree = visible.map(node => node.type === "draft"
     ? { id: node.id, parentId: node.data.parentId, timestamp: "\uffff", depth: (depths.get(node.data.parentId) ?? -1) + 1 }
@@ -470,6 +542,7 @@ let centerRequest = 0;
 onBeforeUnmount(() => { selectionRequest++; centerRequest++; flow.value = undefined; });
 
 async function select(id: string, openChat = false) {
+  revealNode(id);
   if (id.startsWith("draft:") || (id.startsWith("pending:") && !session.current?.graph)) return;
   const request = ++selectionRequest;
   centerRequest++;
@@ -628,6 +701,7 @@ function defaultFocusId() {
 const isPanelElement = (target: Element) => target.matches(".workbench-splitter > [data-panel], .navigator-container");
 
 async function center(id = defaultFocusId(), ensureReadable = false, animate = true) {
+  if (id) revealNode(id);
   const request = ++centerRequest;
   if (!flow.value || !id) return;
   await nextTick();
@@ -789,6 +863,7 @@ function openChatColumn(id: string) {
 }
 
 function nodeClicked(event: NodeMouseEvent) {
+  if (selectionMode.value) return;
   // Any single click, Ctrl held or not, only highlights — the Ctrl gesture
   // for side columns lives on the double-click.
   session.highlightedNode = event.node.id;
@@ -813,10 +888,12 @@ function trackDragModifier(event: NodeMouseEvent) {
 function rememberDrag(event: NodeMouseEvent) {
   const branch = dragFollowsBranch || holdsBranchModifier(event);
   dragFollowsBranch = false;
-  dragged.set(event.node.id, { ...event.node.position, branch });
-  const node = nodes.value.find(node => node.id === event.node.id);
-  if (!node) return;
-  node.position = { ...event.node.position };
+  const moved = (event as NodeMouseEvent & { nodes?: FlowNode[] }).nodes ?? [event.node];
+  for (const item of moved) {
+    dragged.set(item.id, { ...item.position, branch });
+    const node = nodes.value.find(node => node.id === item.id);
+    if (node) node.position = { ...item.position };
+  }
   // Lay out from the drop at once, so a branch dragged along moves with its card
   // instead of following on some later rebuild.
   layoutBranches(nodes.value);
@@ -826,6 +903,13 @@ function rememberDrag(event: NodeMouseEvent) {
 function syncNodeDimensions(changes: NodeChange[]) {
   let resized = false;
   for (const change of changes) {
+    if (change.type === "select") {
+      const next = new Set(selectedIds.value);
+      if (change.selected) next.add(change.id); else next.delete(change.id);
+      selectedIds.value = next;
+      const node = nodes.value.find(node => node.id === change.id);
+      if (node) node.selected = change.selected;
+    }
     if (change.type !== "dimensions") continue;
     const measured = flow.value?.findNode(change.id);
     const node = nodes.value.find(node => node.id === change.id);
@@ -843,6 +927,10 @@ function syncNodeDimensions(changes: NodeChange[]) {
 }
 
 const pendingRuns = computed(() => JSON.stringify(session.current?.graph?.runs.filter(run => run.pending && run.status === "running") ?? []));
+watch(() => session.focusedNode, id => {
+  if (id) revealNode(id);
+  if (hideInactive.value) rebuild();
+});
 watch(
   [() => sessionKey.value, () => projection.value?.nodes, () => projection.value?.edges,
     () => projection.value?.activeBranchNodeIds, () => projection.value?.activeNodeId,
@@ -897,10 +985,14 @@ watch(
       :edges="renderGraph.edges"
       class="session-flow"
       :class="{ booting: !booted }"
-      :min-zoom="0.25"
-      :max-zoom="1.6"
+      :min-zoom="0.05"
+      :max-zoom="3"
       :nodes-draggable="true"
-      :pan-on-drag="true"
+      :pan-on-drag="selectionMode ? [1, 2] : true"
+      :selection-key-code="selectionMode ? true : undefined"
+      :multi-selection-key-code="['Control', 'Meta']"
+      pan-activation-key-code="Space"
+      :zoom-on-double-click="false"
       :zoom-on-scroll="true"
       :only-render-visible-elements="true"
       :delete-key-code="null"
@@ -911,10 +1003,11 @@ watch(
       @node-drag="trackDragModifier"
       @node-drag-stop="rememberDrag"
       @nodes-change="syncNodeDimensions"
+      @viewport-change="viewportZoom = $event.zoom"
     >
       <template #node-prompt="props">
         <!-- Selection is presentation state; changing it must not call Vue Flow's setNodes. -->
-        <PromptNode v-bind="props" :selected="(session.highlightedNode || session.focusedNode) === props.id" />
+        <PromptNode v-bind="props" :selected="selectedIds.has(props.id) || (session.highlightedNode || session.focusedNode) === props.id" />
       </template>
       <template #node-draft="props">
         <DraftNode v-bind="props" />
@@ -928,10 +1021,19 @@ watch(
         :aria-label="t('graph.minimapLabel')"
         @click="navigateMinimap"
       />
-      <GraphOverview v-if="layout.layout.minimap && nodes.length >= 500" :nodes="nodes" :highlight="searchHitIds.size ? searchHitIds : undefined" />
+      <GraphOverview v-if="layout.layout.minimap && nodes.length >= 500" :nodes="nodes.filter(node => !node.hidden)" :highlight="searchHitIds.size ? searchHitIds : undefined" />
     </VueFlow>
 
-    <nav class="graph-controls">
+    <nav v-if="session.current" class="graph-controls">
+      <Button variant="ghost" size="icon" data-action="graph-selection" :aria-pressed="selectionMode" :aria-label="t('graph.selectMode')" :title="t('graph.selectMode')" @click="selectionMode = !selectionMode">
+        <MousePointer2 v-if="selectionMode" :size="15" /><Hand v-else :size="15" />
+      </Button>
+      <Button variant="ghost" size="icon" :aria-label="t('graph.zoomOut')" :title="t('graph.zoomOut')" @click="flow?.zoomOut()"><Minus :size="15" /></Button>
+      <span class="graph-zoom">{{ Math.round(viewportZoom * 100) }}%</span>
+      <Button variant="ghost" size="icon" :aria-label="t('graph.zoomIn')" :title="t('graph.zoomIn')" @click="flow?.zoomIn()"><Plus :size="15" /></Button>
+      <Button variant="ghost" size="icon" data-action="graph-fit" :aria-label="t('graph.fitCanvas')" :title="t('graph.fitCanvas')" @click="fitCanvas"><Scan :size="15" /></Button>
+      <Button variant="ghost" size="icon" data-action="graph-hide-inactive" :aria-pressed="hideInactive" :aria-label="t('graph.hideInactive')" :title="t('graph.hideInactive')" @click="hideInactive = !hideInactive; saveVisibility(); rebuild()"><EyeOff :size="15" /></Button>
+      <Button variant="ghost" size="icon" data-action="graph-show-all" :aria-label="t('graph.showAllBranches')" :title="t('graph.showAllBranches')" @click="showAllBranches"><RotateCcw :size="15" /></Button>
       <div v-if="searchOpen" class="graph-search nodrag nowheel" @mousedown.stop @wheel.stop>
         <input
           ref="searchInput"
@@ -956,6 +1058,7 @@ watch(
       <Button
         variant="ghost"
         size="icon"
+        data-action="graph-minimap"
         :aria-pressed="layout.layout.minimap"
         :aria-label="t('graph.toggleMinimap')"
         :title="t('graph.toggleMinimap')"
@@ -967,6 +1070,9 @@ watch(
     <footer class="graph-footer">
       <span>{{ t("graph.turnsLinks", { turns: projection?.nodes.length ?? 0, links: projection?.edges.length ?? 0 }) }}</span>
       <span>{{ t("graph.activeBranch", { n: projection?.activeBranchNodeIds.length ?? 0 }) }}</span>
+      <span v-if="visibility.hidden.size">{{ t('graph.hiddenNodes', { n: visibility.hidden.size }) }}</span>
+      <span v-if="selectedIds.size">{{ t('graph.selectedNodes', { n: selectedIds.size }) }}</span>
+      <span v-if="session.current">{{ t('graph.canvasHint') }}</span>
       <span v-if="session.current?.graph">{{ t("graph.parallelRuns", { n: session.current.graph.runs.filter(r => r.status === 'running').length }) }}</span>
     </footer>
   </main>

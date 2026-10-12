@@ -343,7 +343,10 @@ kbd {
   background: radial-gradient(circle, color-mix(in srgb,var(--border-strong) 25%,transparent) var(--dot-grid-dot, 2px), transparent var(--dot-grid-dot, 2px)) 0 0/var(--dot-grid-size, 24px) var(--dot-grid-size, 24px) var(--surface-subtle);
 }
 html[data-dot-grid="off"] :is(.session-flow, .welcome, .graph-empty) { background-image: none; }
-.graph-controls { position: absolute; right: 8px; bottom: 33px; z-index: 10; display: flex; align-items: center; gap: 2px; }
+.graph-controls { flex: 0 0 auto; align-self: flex-end; margin: 4px 8px; max-width: calc(100% - 16px); flex-wrap: wrap; justify-content: flex-end; padding: 3px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); z-index: 10; display: flex; align-items: center; gap: 2px; }
+.graph-zoom { min-width: 38px; text-align: center; color: var(--muted); font-size: var(--font-size-caption); font-variant-numeric: tabular-nums; }
+.node-fold { position: absolute; left: -12px; top: -12px; min-width: 24px; height: 24px; padding: 0 5px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--accent); font-size: var(--font-size-caption); cursor: pointer; }
+.node-fold:hover, .node-fold:focus-visible { background: var(--accent-soft); }
 .graph-controls button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-strong); }
 .graph-search { display: flex; align-items: center; gap: 4px; margin-right: 4px; padding: 0 8px; height: 28px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
 .graph-search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px var(--ring); }
